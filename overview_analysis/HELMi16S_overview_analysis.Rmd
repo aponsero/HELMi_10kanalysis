@@ -1,0 +1,210 @@
+---
+title: "HELMi 16S - overview analysis"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r, warning=FALSE, echo=FALSE, message=FALSE}
+library(phyloseq)
+library(tidyverse)
+library(microbiome)
+library(knitr)
+library(vegan)
+library(dplyr)
+library(reshape2)
+```
+
+# Overview
+
+Goals:
+Dataset source: 
+
+# import tables and format for PhylloSeq
+
+```{r, warning=FALSE, echo=FALSE, message=FALSE}
+
+# import tables and format for PhylloSeq
+## create TaxTable
+taxMat <- read_csv("../Raw_Data/formated/TaxTable_HELMi10k_16.02.21.csv") 
+taxMat <- taxMat %>% tibble::column_to_rownames("TaxID")
+TAX = tax_table(as.matrix(taxMat))
+
+## create countTable
+countMat <- read_csv("../Raw_Data/formated/CountTable_HELMi10k_16.02.21.csv")
+countMat <- countMat %>% tibble::column_to_rownames("TaxID") 
+OTU = otu_table(as.matrix(countMat), taxa_are_rows = TRUE)
+
+## sample description file 
+# sampleMat <- read_csv("../Raw_Data/formated/SampleTable_HELMi10k_16.02.21.csv")
+sampleMat <- read_csv("../Raw_Data/formated/SampleTableEnhanced_HELMi10k_16.02.21.csv") 
+nb_sampleFam <- sampleMat %>% select(family, sample_type) %>% unique() %>% group_by(family) %>%
+  tally() %>% rename("nb_samples"="n")
+sampleMat <- left_join(sampleMat, nb_sampleFam)
+sampleMat <- sampleMat %>%tibble::column_to_rownames("sample_ID")
+SAMPLE = sample_data(as.data.frame(sampleMat))
+
+physeq = phyloseq(OTU, TAX, SAMPLE)
+
+```
+
+# Look at control samples
+
+```{r}
+# subset to controls
+pseq.controls <- subset_samples(physeq, (sample_info == "cont" & ReadCount>100000))
+
+# Convert to compositional data
+pseq.controlsrel <- microbiome::transform(pseq.controls, "compositional")
+
+# Ordinate the data
+set.seed(4235421)
+ord <- ordinate(pseq.controlsrel, "NMDS", "bray")
+
+plot_ordination(pseq.controlsrel, ord, color = "family") +
+                geom_point(size = 2)
+
+plot_ordination(pseq.controlsrel, ord, color = "run") +
+                geom_point(size = 2)
+
+```
+# Alpha diversity analysis
+
+## Parents samples
+
+```{r}
+# subset to mother and fathers samples
+pseq.parents <- subset_samples(physeq, (sample_type %in% c("M", "F") & ReadCount>100000))
+
+#alpha analysis all
+trich <-alpha(pseq.parents, index = "all")
+plot_richness(pseq.parents, x = "sample_type") + geom_boxplot()
+
+# significance testing
+d <- meta(pseq.parents)
+d$diversity <- alpha(pseq.parents, "shannon")$diversity_shannon
+# Split the values by group
+spl <- split(d$diversity, d$sample_type)
+# Kolmogorov-Smirnov test
+pv <- ks.test(spl$F, spl$M)$p.value
+# Adjust the p-value
+padj <- p.adjust(pv)
+
+```
+
+## Baby samples
+
+```{r}
+# subset to baby samples
+baby_times <- c("B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9")
+pseq.babies <- subset_samples(physeq, (sample_type %in% baby_times & ReadCount>100000))
+
+#alpha analysis all
+plot_richness(pseq.babies, x = "sample_type", measures=c("Observed", "Chao1", "Shannon", "Simpson")) + geom_boxplot()
+
+d <- meta(pseq.babies)
+d$diversity <- alpha(pseq.babies, "shannon")$diversity_shannon
+# Split the values by group
+spl <- split(d$diversity, d$sample_type)
+# Kolmogorov-Smironv test
+pv <- ks.test(spl$B1, spl$B3)$p.value
+# Adjust the p-value
+padj <- p.adjust(pv)
+
+```
+
+# B-diversity analysis
+
+## infant sample time clustering
+
+```{r}
+# subset to baby samples
+baby_times <- c("B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9")
+pseq.babies <- subset_samples(physeq, (sample_type %in% baby_times & ReadCount>100000))
+
+# Convert to compositional data
+pseq.babyrel <- microbiome::transform(pseq.babies, "compositional")
+
+plot_heatmap(pseq.babyrel, "NMDS", "bray", "sample_type", "Familly")
+
+```
+
+```{r}
+# subset to families samples
+family_times <- c("M", "F", "B9")
+pseq.family <- subset_samples(physeq, (sample_type %in% family_times & ReadCount>100000 & nb_samples==10))
+
+pseq.familyrel <- microbiome::transform(pseq.family, "compositional")
+
+plot_heatmap(pseq.familyrel, "NMDS", "bray", "family", "Familly")
+
+```
+
+
+
+# NMDS exploration
+
+## Baby samples all sampling times
+
+```{r}
+# subset to baby samples
+baby_times <- c("B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9")
+pseq.babies <- subset_samples(physeq, (sample_type %in% baby_times & ReadCount>100000))
+
+# Convert to compositional data
+pseq.babyrel <- microbiome::transform(pseq.babies, "compositional")
+
+# Pick core taxa with with the given prevalence and detection limits
+#pseq.babycore <- core(pseq.babyrel, detection = .1/100, prevalence = 90/100)
+
+# Use relative abundances for the core
+#pseq.babycore <- microbiome::transform(pseq.babycore, "compositional")
+
+# Ordinate the data
+set.seed(4235421)
+ord <- ordinate(pseq.babyrel, "NMDS", "bray")
+
+plot_ordination(pseq.babyrel, ord, color = "sample_type") +
+                geom_point(size = 2)
+```
+
+
+## Baby samples Early sampling times
+
+```{r}
+# subset to baby samples
+baby_earlytimes <- c("B1", "B2")
+pseq.babyearly <- subset_samples(physeq, (sample_type %in% baby_earlytimes & ReadCount>100000))
+
+# Convert to compositional data
+pseq.babyearlyrel <- microbiome::transform(pseq.babyearly, "compositional")
+
+# Ordinate the data
+set.seed(4235421)
+ord <- ordinate(pseq.babyearlyrel, "NMDS", "bray")
+
+plot_ordination(pseq.babyearlyrel, ord, color = "sample_type") +
+                geom_point(size = 2)
+
+plot_ordination(pseq.babyearlyrel, ord, color = "inf_DeliveryMode") +
+                geom_point(size = 2)
+```
+
+```{r}
+# envfit computation on birth mode
+
+# apply envfit to the birthmode variable
+birthMode = get_variable(pseq.babyearly, "inf_DeliveryMode")
+DeliveryMode <- c("Vaginal", "C-section")
+sample_data(pseq.babyearly)$inf_DeliveryMode <- factor(DeliveryMode)
+
+nmds.envfit <- envfit(ord$points, env = as.data.frame(sample_data(pseq.babyearly)$inf_DeliveryMode), perm = 999) #standard envfit
+nmds.envfit
+
+
+```
+
+
+
+
+
